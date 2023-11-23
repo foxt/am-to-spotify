@@ -159,12 +159,14 @@ async function getSpotifyTrackMatching(track,i) {
 var amPlaylist = await getAMPlaylistTracks(AM_PLAYLIST_ID);
 let spotifyIdQueue = [];
 
+
+let shouldOverwrite = PLAYLIST_OVERWRITE;
 async function pushSpotifyIDQueue() {
     var set = spotifyIdQueue.slice(0, 99);
     while (true) {
         console.error("Syncing to Spotify...");
         const req = await fetch("https://api.spotify.com/v1/playlists/" + SPOT_PLAYLIST_ID + "/tracks", {
-            method: PLAYLIST_OVERWRITE ? "PUT" : "POST",
+            method: shouldOverwrite ? "PUT" : "POST",
             headers: {
                 "content-type": "application/json",
                 "authorization": "Bearer " + await getSpotifyToken()
@@ -181,7 +183,7 @@ async function pushSpotifyIDQueue() {
             continue;
         }
         if (!req.ok) throw new Error("Could not add tracks to Spotify playlist" + req.status +  req.statusText + (await req.text()));
-        PLAYLIST_OVERWRITE = false;
+        shouldOverwrite = false;
         break;
     }
     spotifyIdQueue = spotifyIdQueue.filter((a) => !set.includes(a));
