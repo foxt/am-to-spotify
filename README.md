@@ -23,5 +23,5 @@ Quick and dirty script for transfering a playlist on Apple Music to Spotify.
 ## Usage
 
 1. Download the script as a zip file.
-2. Edit the config.js file, filling in the details you collected from the above
-3. Run the script with `node index.js`
+2. Edit the `config.mjs` file, filling in the details you collected from the above
+3. Run the script with `node index.mjs`

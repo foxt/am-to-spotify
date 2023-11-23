@@ -1,6 +1,6 @@
 import child_process from "child_process";
 import http from "http";
-import { AM_PLAYLIST_ID, PLAYLIST_OVERWRITE, SPOT_CLIENT_ID, SPOT_CLIENT_SECRET, SPOT_PLAYLIST_ID } from "./config.js";
+import { AM_PLAYLIST_ID, PLAYLIST_OVERWRITE, SPOT_CLIENT_ID, SPOT_CLIENT_SECRET, SPOT_PLAYLIST_ID } from "./config.mjs";
 
 let amJwk ="";
 
