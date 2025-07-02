@@ -1,9 +1,8 @@
 import child_process from "child_process";
 import http from "http";
-import { AM_PLAYLIST_ID, PLAYLIST_OVERWRITE, SPOT_CLIENT_ID, SPOT_CLIENT_SECRET, SPOT_PLAYLIST_ID } from "./config.mjs";
+import { AM_PLAYLIST_ID, NO_DUPLICATE_EXISTING, PLAYLIST_OVERWRITE, SPOT_CLIENT_ID, SPOT_CLIENT_SECRET, SPOT_PLAYLIST_ID } from "./config.mjs";
 
 let amJwk ="";
-
 async function getAMJWK() {
     if (amJwk) return amJwk;
     // we need to get a HTML page to get the JS bundle that contains the JWK
@@ -40,10 +39,9 @@ async function getAMPlaylistTracks(playlistId) {
         });
         if (!f.ok) throw new Error("Could not get playlist tracks" + f.status +  f.statusText);
         resp = (await f.json())
-        var tracks = resp
-        .data
-        .filter((a) => a.type == "songs")
-        .map(a => a.attributes);
+        var tracks = resp.data
+            .filter((a) => a.type == "songs")
+            .map(a => a.attributes);
         totalTracks = totalTracks.concat(tracks);
     } while (resp.next);
     return totalTracks;
@@ -114,35 +112,47 @@ async function getSpotifyToken() {
     spotifyToken = resp.access_token;
     spotifyRefreshToken = resp.refresh_token;
     spotifyTokenExpires = Date.now() + (resp.expires_in * 1000);
-    return spotifyToken;
-
+    return spotifyToken; 
 
 }
 
-
-async function getSpotifyTrackMatching(track,i) {
-    var { name, artistName, albumName, isrc,original } = track;
-    original = original || track;
-    var query = "isrc:" + isrc;
-    if (!isrc && name && artistName && albumName) query = `track:"${name}" artist:"${artistName}" album:"${albumName}"`;
-    if (!isrc && name && artistName) query = `track:"${name}" artist:"${artistName}"`;
-    if (!isrc && name) query = `track:"${name}"`;
-    var f = await fetch(`https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=track&limit=1`, {
+async function callSpotify(url, opts) {
+    var f = await fetch(`https://api.spotify.com/v1` + url, {
+        ...opts,
         headers: {
-            Authorization: "Bearer " + await getSpotifyToken()
+            Authorization: "Bearer " + await getSpotifyToken(),
+            ...opts?.headers,
         }
     });
     if (f.status == 429) {
         var retry = (parseInt(f.headers.get("retry-after")) + 1) || 5;
         await new Promise((resolve) => setTimeout(resolve, retry * 1000));
-        return await getSpotifyTrackMatching(track);
+        return callSpotify(url, opts);
     }
     if (f.status == 401) {
         spotifyToken = "";
-        return await getSpotifyTrackMatching(track);
+        return callSpotify(url, opts);
     }
-    if (!f.ok) throw new Error("Could not get Spotify track" + f.status +  f.statusText + (await f.text()));
-    var resp = await f.json();
+    if (!f.ok) throw new Error(url + ": " + f.status +  f.statusText + (await f.text()));
+    return await f.json();
+
+}
+
+
+let matchCache = new Map();
+async function getSpotifyTrackMatching(track,i) {
+    var { name, artistName, albumName, isrc,original, playParams: { id } } = track;
+    if (matchCache.has(id)) {
+        let cached = matchCache.get(id);
+        console.log([i,original.isrc,original.name,original.artistName,original.albumName,true,cached, "from cache"].map((a) => JSON.stringify(a)).join(","));
+        return cached;
+    }
+    original = original || track;
+    var query = "isrc:" + isrc;
+    if (!isrc && name && artistName && albumName) query = `track:"${name}" artist:"${artistName}" album:"${albumName}"`;
+    if (!isrc && name && artistName) query = `track:"${name}" artist:"${artistName}"`;
+    if (!isrc && name) query = `track:"${name}"`;
+    let resp = await callSpotify(`/search?q=${encodeURIComponent(query)}&type=track&limit=1`);
 
     if (!resp.tracks.items.length) return null;
     var responseTrack =  resp.tracks.items[0];
@@ -150,39 +160,29 @@ async function getSpotifyTrackMatching(track,i) {
         if (isrc) return await getSpotifyTrackMatching({ original: track, ...track, isrc: null });
         if (albumName) return await getSpotifyTrackMatching({ original: track, ...track, albumName: null });
         console.log([i,original.isrc,original.name,original.artistName,original.albumName,false,"Not found"].map((a) => JSON.stringify(a)).join(","));
+        matchCache.set(id, null);
         return null;
     } else {
         console.log([i,original.isrc,original.name,original.artistName,original.albumName,true,responseTrack.id,responseTrack.name,responseTrack.artists.map(a => a.name).join(","),responseTrack.album.name].map((a) => JSON.stringify(a)).join(","));
-        return responseTrack;
+        matchCache.set(id, responseTrack.uri);
+        return responseTrack.uri;
     }
 }
-var amPlaylist = await getAMPlaylistTracks(AM_PLAYLIST_ID);
-let spotifyIdQueue = [];
 
 
-let shouldOverwrite = PLAYLIST_OVERWRITE;
+
+let shouldOverwrite = NO_DUPLICATE_EXISTING ? false : PLAYLIST_OVERWRITE;
 async function pushSpotifyIDQueue() {
     var set = spotifyIdQueue.slice(0, 99);
     while (true) {
         console.error("Syncing to Spotify...");
-        const req = await fetch("https://api.spotify.com/v1/playlists/" + SPOT_PLAYLIST_ID + "/tracks", {
+        await callSpotify("/playlists/" + SPOT_PLAYLIST_ID + "/tracks", {
             method: shouldOverwrite ? "PUT" : "POST",
             headers: {
                 "content-type": "application/json",
-                "authorization": "Bearer " + await getSpotifyToken()
             },
             body: JSON.stringify({ uris: set })
         })
-        if (req.status == 429) {
-            var retry = (parseInt(req.headers.get("retry-after")) + 1) || 5;
-            await new Promise((resolve) => setTimeout(resolve, retry * 1000));
-            continue;
-        }
-        if (req.status == 401) {
-            spotifyToken = "";
-            continue;
-        }
-        if (!req.ok) throw new Error("Could not add tracks to Spotify playlist" + req.status +  req.statusText + (await req.text()));
         shouldOverwrite = false;
         break;
     }
@@ -190,11 +190,39 @@ async function pushSpotifyIDQueue() {
 
 }
 
+/**
+ * Returns a list of ISRCs in the Spotify playlist.
+ */
+async function getSpotifyPlaylistTracks(playlistId) {
+    let offset = 0;
+    let total = 0;
+    let isrcs = new Set();
+    while (true) {
+        console.error("Fetching Spotify playlist tracks [" + offset + "/ " + total + "]");
+        const t = await callSpotify( `/playlists/${playlistId}/tracks?fields=items(track(external_ids.isrc)),next,offset,total&limit=100&offset=${offset}`);
+        t.items.forEach((item) => isrcs.add(item.track.external_ids.isrc));
+        offset += t.items.length;
+        total = t.total;
+        if (!t.next) break;
+    }
+    console.error(`Fetched Spotify playlist tracks [${offset} total, ${isrcs.size} unique]`);
+    return isrcs;
+}
+
+var amPlaylist = await getAMPlaylistTracks(AM_PLAYLIST_ID);
+let spotifyIdQueue = [];
+let seenIsrcs = NO_DUPLICATE_EXISTING ? await getSpotifyPlaylistTracks(SPOT_PLAYLIST_ID) : new Set();
+
+
 console.log("i,isrc,name,artistName,albumName,found,spotifyId,spotifyName,spotifyArtists,spotifyAlbum");
 for (var i = 0; i < amPlaylist.length; i++) {
     var track = amPlaylist[i];
+    if (track.isrc) {
+        if (seenIsrcs.has(track.isrc)) continue;
+        seenIsrcs.add(track.isrc);
+    }
     var spotTrack = await getSpotifyTrackMatching(track,amPlaylist.length -  i);
-    if (spotTrack) spotifyIdQueue.push(spotTrack.uri);
+    if (spotTrack) spotifyIdQueue.push(spotTrack);
     if (spotifyIdQueue.length >= 100) await pushSpotifyIDQueue();
 }
 if (spotifyIdQueue.length) await pushSpotifyIDQueue();
