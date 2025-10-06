@@ -10,7 +10,7 @@ async function getAMJWK() {
     var htmlF = await fetch("https://music.apple.com/");
     var html = await htmlF.text();
     // we need to extract the JS bundle URL
-    var jsBundleUrl = html.match(/src="(\/assets\/index-(legacy-)?[a-f0-9]+.js)"/);
+    var jsBundleUrl = html.match(/src="(\/assets\/index[-~](legacy-)?[a-f0-9]+.js)"/);
     if (!jsBundleUrl) throw new Error("Could not find JS bundle URL");
     // we need to get the JS bundle
     console.error("Getting JS bundle");
