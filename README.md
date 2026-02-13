@@ -1,3 +1,7 @@
+> [!IMPORTANT]
+> Since the [February 2026 Spotify API lockdown](https://developer.spotify.com/documentation/web-api/references/changes/february-2026) this script is no longer functional. 
+
+
 # `am-to-spotify`
 
 Quick and dirty script for transfering a playlist on Apple Music to Spotify.
