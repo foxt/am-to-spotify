@@ -17,7 +17,7 @@ async function getAMJWK() {
     var jsF = await fetch(`https://music.apple.com/${jsBundleUrl[1]}`);
     var js = await jsF.text();
     // we need to extract the JWK
-    var jwk = js.match(/"(eyJhb([a-zA-Z0-9_-]+)\.([a-zA-Z0-9_-]+)\.([a-zA-Z0-9_-]+))"/);
+    var jwk = js.match(/"(eyJ([a-zA-Z0-9_-]+)\.([a-zA-Z0-9_-]+)\.([a-zA-Z0-9_-]+))"/);
     if (!jwk) throw new Error("Could not find JWK");
     amJwk = jwk[1];
     console.error("JWK", amJwk);
@@ -77,7 +77,7 @@ async function getSpotifyToken() {
         "response_type=code" +
         "&client_id=" + SPOT_CLIENT_ID +
         "&scope=playlist-modify-public%20playlist-modify-private" +
-        "&redirect_uri=http%3A%2F%2Flocalhost:46851%2Fspot-callback";
+        "&redirect_uri=http%3A%2F%2F127.0.0.1:46851%2Fspot-callback";
     console.error("Please open the following link in your browser: ", authUrl);
     if (process.platform == "darwin") child_process.spawn("/usr/bin/open", [authUrl]);
     else if (process.platform == "win32") child_process.spawn("cmd", ["/c", "start", authUrl]);
@@ -105,7 +105,7 @@ async function getSpotifyToken() {
             "Content-Type": "application/x-www-form-urlencoded",
             "Authorization": "Basic " + (Buffer.from(SPOT_CLIENT_ID + ":" + SPOT_CLIENT_SECRET).toString("base64"))
         },
-        body: "grant_type=authorization_code&code=" + code + "&redirect_uri=http%3A%2F%2Flocalhost:46851%2Fspot-callback"
+        body: "grant_type=authorization_code&code=" + code + "&redirect_uri=http%3A%2F%2F127.0.0.1:46851%2Fspot-callback"
     });
     if (!f.ok) throw new Error("Could not get Spotify token");
     var resp = await f.json();
@@ -200,7 +200,11 @@ async function getSpotifyPlaylistTracks(playlistId) {
     while (true) {
         console.error("Fetching Spotify playlist tracks [" + offset + "/ " + total + "]");
         const t = await callSpotify( `/playlists/${playlistId}/tracks?fields=items(track(external_ids.isrc)),next,offset,total&limit=100&offset=${offset}`);
-        t.items.forEach((item) => isrcs.add(item.track.external_ids.isrc));
+        for (let item of t.items) {
+            let isrc = item.track.external_ids.isrc;
+            if (isrc) isrcs.add(isrc);
+            else console.warn("Spotify track without ISRC, cannot deduplicate:", item.track);
+        }
         offset += t.items.length;
         total = t.total;
         if (!t.next) break;
